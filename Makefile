@@ -95,6 +95,8 @@ $(BINARY): $(OBJECTS)
 headers: $(HEADERS)
 	@echo
 
+$(OBJECTS): headers
+
 functions.h:
 	echo "/* Automatically generated function definitions */" > $@
 	echo >> $@
