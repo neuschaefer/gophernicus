@@ -152,7 +152,7 @@ install-done:
 	@echo
 	@echo "======================================================================"
 	@echo
-	@echo "Gophernicus has now been succesfully installed. To try it out, launch"
+	@echo "Gophernicus has now been successfully installed. To try it out, launch"
 	@echo "your favorite gopher browser and navigate to your gopher root."
 	@echo
 	@echo "Gopher URL...: gopher://`hostname`/"

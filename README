@@ -53,7 +53,7 @@ Command line options:
 Setting up a gopher site
 ========================
 
-After succesfully installing Gophernicus (see INSTALL) you need to set
+After successfully installing Gophernicus (see INSTALL) you need to set
 up the gopher root directory. By default Gophernicus serves documents
 from /var/gopher so start by creating that directory and making sure
 it's world-readable. Then, simply add files and directories under your
