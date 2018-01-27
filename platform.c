@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,13 +35,11 @@ void platform(state *st)
 #if defined(_AIX) || defined(__linux) || defined(__APPLE__)
 	FILE *fp;
 #endif
-#if defined(__arm__) || defined(__mips__) || defined(__APPLE__)
-	char buf[BUFSIZE];
-#endif
 #ifdef __linux
 	struct stat file;
 #endif
 	struct utsname name;
+	char buf[BUFSIZE];
 	char sysname[64];
 	char release[64];
 	char machine[64];
@@ -114,7 +112,7 @@ void platform(state *st)
 	}
 #endif
 
-	/* Linux uname() just says Linux/2.6 - let's dig deeper... */
+	/* Linux uname() just says Linux/kernelversion - let's dig deeper... */
 #ifdef __linux
 
 	/* Most Linux ARM/MIPS boards have hardware name in /proc/cpuinfo */
@@ -136,6 +134,45 @@ void platform(state *st)
 	}
 #endif
 
+	/* Get hardware type from DMI data */
+	if (!*st->server_description && (fp = fopen("/sys/class/dmi/id/board_vendor" , "r"))) {
+		fgets(buf, sizeof(buf), fp);
+		fclose(fp);
+
+		sstrlcpy(st->server_description, buf);
+		chomp(st->server_description);
+
+		if ((fp = fopen("/sys/class/dmi/id/board_name" , "r"))) {
+			fgets(buf, sizeof(buf), fp);
+			fclose(fp);
+
+			if (*st->server_description) sstrlcat(st->server_description, " ");
+			sstrlcat(st->server_description, buf);
+			chomp(st->server_description);
+		}
+	}
+
+	/* No DMI? Get possible hypervisor name */
+	if (!*st->server_description && (fp = fopen("/sys/hypervisor/type" , "r"))) {
+		fgets(buf, sizeof(buf), fp);
+		fclose(fp);
+
+		chomp(buf);
+		ucfirst(buf);
+
+		if (*buf) snprintf(st->server_description, sizeof(st->server_description), "%s virtual machine", buf);
+	}
+
+	/* Identify Gentoo */
+	if (!*sysname && (fp = fopen("/etc/gentoo-release", "r"))) {
+		fgets(sysname, sizeof(sysname), fp);
+		fclose(fp);
+
+		if ((c = strstr(sysname, "release "))) sstrlcpy(release, c + 8);
+		if ((c = strchr(release, ' '))) *c = '\0';
+		if ((c = strchr(sysname, ' '))) *c = '\0';
+	}
+
 	/* Identify RedHat */
 	if (!*sysname && (fp = fopen("/etc/redhat-release", "r"))) {
 		fgets(sysname, sizeof(sysname), fp);
@@ -143,8 +180,8 @@ void platform(state *st)
 
 		if ((c = strstr(sysname, "release "))) sstrlcpy(release, c + 8);
 		if ((c = strchr(release, ' '))) *c = '\0';
-
 		if ((c = strchr(sysname, ' '))) *c = '\0';
+
 		if (strcmp(sysname, "Red") == MATCH) sstrlcpy(sysname, "RedHat");
 	}
 
@@ -156,6 +193,20 @@ void platform(state *st)
 		if ((c = strchr(sysname, ' '))) {
 			sstrlcpy(release, c + 1);
 			*c = '\0';
+		}
+	}
+
+	/* Identify CRUX */
+	if (!*sysname && stat("/usr/bin/crux", &file) == OK && (file.st_mode & S_IXOTH)) {
+
+		sstrlcpy(sysname, "CRUX");
+
+		if ((fp = popen("/usr/bin/crux", "r"))) {
+			fgets(buf, sizeof(buf), fp);
+			pclose(fp);
+
+			if ((c = strchr(buf, ' ')) && (c = strchr(c + 1, ' ')))
+				sstrlcpy(release, c + 1);
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,6 +24,16 @@
 
 
 #include "gophernicus.h"
+
+
+/*
+ * Make a string's first character uppercase
+ */
+void ucfirst(char *str)
+{
+	if (str == NULL || !*str) return;
+	*str = toupper(*str);
+}
 
 
 /*
@@ -53,7 +63,7 @@ void strreplace(char *str, char from, char to)
  */
 size_t strcut(char *str, size_t width)
 {
-	unsigned char c;
+	unsigned char c = '\0';
 	int w = 0;
 	int i;
 

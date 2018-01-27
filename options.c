@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -97,10 +97,11 @@ void parse_args(state *st, int argc, char *argv[])
 	int opt;
 
 	/* Parse args */
-	while ((opt = getopt(argc, argv, "h:p:r:t:g:a:c:u:m:l:w:o:s:i:k:f:e:R:D:L:A:P:n:db?-")) != ERROR) {
+	while ((opt = getopt(argc, argv, "h:p:T:r:t:g:a:c:u:m:l:w:o:s:i:k:f:e:R:D:L:A:P:n:dbv?-")) != ERROR) {
 		switch(opt) {
 			case 'h': sstrlcpy(st->server_host, optarg); break;
 			case 'p': st->server_port = atoi(optarg); break;
+			case 'T': st->server_tls_port = atoi(optarg); break;
 			case 'r': sstrlcpy(st->server_root, optarg); break;
 			case 't': st->default_filetype = *optarg; break;
 			case 'g': sstrlcpy(st->map_file, optarg); break;
@@ -141,10 +142,16 @@ void parse_args(state *st, int argc, char *argv[])
 				if (*optarg == 'a') { st->opt_caps = FALSE; break; }
 				if (*optarg == 'm') { st->opt_shm = FALSE; break; }
 				if (*optarg == 'r') { st->opt_root = FALSE; break; }
+				if (*optarg == 'p') { st->opt_proxy = FALSE; break; }
 				break;
 
 			case 'd': st->debug = TRUE; break;
 			case 'b': puts(license); exit(EXIT_SUCCESS);
+
+			case 'v': 
+				printf("%s/%s \"%s\" (built %s)\n", SERVER_SOFTWARE, VERSION, CODENAME, __DATE__);
+				exit(EXIT_SUCCESS);
+
 			default : puts(readme); exit(EXIT_SUCCESS);
 		}
 	}

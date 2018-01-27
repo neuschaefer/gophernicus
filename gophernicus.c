@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -329,7 +329,7 @@ char *get_local_address(void)
 #endif
 
 	/* Nothing works... I'm out of ideas */
-	return DEFAULT_ADDR;
+	return UNKNOWN_ADDR;
 }
 
 
@@ -374,7 +374,7 @@ char *get_peer_address(void)
 #endif
 
 	/* Nothing works... I'm out of ideas */
-	return DEFAULT_ADDR;
+	return UNKNOWN_ADDR;
 }
 
 
@@ -392,6 +392,7 @@ void init_state(state *st)
 	strclear(st->req_selector);
 	strclear(st->req_realpath);
 	strclear(st->req_query_string);
+	strclear(st->req_search);
 	strclear(st->req_referrer);
 	sstrlcpy(st->req_local_addr, get_local_address());
 	sstrlcpy(st->req_remote_addr, get_peer_address());
@@ -414,6 +415,7 @@ void init_state(state *st)
 		sstrlcpy(st->server_host, buf);
 
 	st->server_port = DEFAULT_PORT;
+	st->server_tls_port = DEFAULT_TLS_PORT;
 
 	st->default_filetype = DEFAULT_TYPE;
 	sstrlcpy(st->map_file, DEFAULT_MAP);
@@ -450,6 +452,7 @@ void init_state(state *st)
 	st->opt_caps = TRUE;
 	st->opt_shm = TRUE;
 	st->opt_root = TRUE;
+	st->opt_proxy = TRUE;
 	st->debug = FALSE;
 
 	/* Load default suffix -> filetype mappings */
@@ -480,6 +483,11 @@ int main(int argc, char *argv[])
 	shm_state *shm;
 	int shmid;
 #endif
+#ifdef ENABLE_HAPROXY1
+	char remote[BUFSIZE];
+	char local[BUFSIZE];
+	int dummy;
+#endif
 
 	/* Get the name of this binary */
 	if ((c = strrchr(argv[0], '/'))) sstrlcpy(self, c + 1);
@@ -490,12 +498,20 @@ int main(int argc, char *argv[])
 	setlocale(LC_TIME, DATE_LOCALE);
 #endif
 	init_state(&st);
+	srand(time(NULL) / (getpid() + getppid()));
 
 	/* Handle command line arguments */
 	parse_args(&st, argc, argv);
 
 	/* Open syslog() */
 	if (st.opt_syslog) openlog(self, LOG_PID, LOG_DAEMON);
+
+	/* Check if TCP wrappers have something to say about this connection */
+#ifdef HAVE_LIBWRAP
+	if (sstrncmp(st.req_remote_addr, UNKNOWN_ADDR) != MATCH &&
+	    hosts_ctl(self, STRING_UNKNOWN, st.req_remote_addr, STRING_UNKNOWN) == WRAP_DENIED)
+		die(&st, ERR_ACCESS, "Refused connection");
+#endif
 
 	/* Make sure the computer is turned on */
 #ifdef __HAIKU__
@@ -506,7 +522,7 @@ int main(int argc, char *argv[])
 	/* Refuse to run as root */
 #ifdef HAVE_PASSWD
 	if (st.opt_root && getuid() == 0)
-		die(&st, ERR_ACCESS, "Refusing to run as root");
+		die(&st, ERR_ACCESS, "Cowardly refusing to run as root");
 #endif
 
 	/* Try to get shared memory */
@@ -548,6 +564,7 @@ int main(int argc, char *argv[])
 		platform(&st);
 
 	/* Read selector */
+get_selector:
 	if (fgets(selector, sizeof(selector) - 1, stdin) == NULL)
 		selector[0] = '\0';
 
@@ -555,6 +572,23 @@ int main(int argc, char *argv[])
 	chomp(selector);
 
 	if (st.debug) syslog(LOG_INFO, "client sent us \"%s\"", selector);
+
+	/* Handle HAproxy/Stunnel proxy protocol v1 */
+#ifdef ENABLE_HAPROXY1
+	if (sstrncmp(selector, "PROXY TCP") == MATCH && st.opt_proxy) {
+		if (st.debug) syslog(LOG_INFO, "got proxy protocol header \"%s\"", selector);
+
+		sscanf(selector, "PROXY TCP%d %s %s %d %d",
+			&dummy, remote, local, &dummy, &st.server_port);
+
+		/* Strip ::ffff: IPv4-in-IPv6 prefix and override old addresses */
+		sstrlcpy(st.req_local_addr, local + ((sstrncmp(local, "::ffff:") == MATCH) ? 7 : 0));
+		sstrlcpy(st.req_remote_addr, remote + ((sstrncmp(remote, "::ffff:") == MATCH) ? 7 : 0));
+
+		/* My precious \o/ */
+		goto get_selector;
+	}
+#endif
 
 	/* Handle hURL: redirect page */
 	if (sstrncmp(selector, "URL:") == MATCH) {
@@ -595,6 +629,25 @@ int main(int argc, char *argv[])
 	if (shm) get_shm_session(&st, shm);
 #endif
 
+
+	/* Parse <tab>search from selector */
+	if ((c = strchr(selector, '\t'))) {
+		sstrlcpy(st.req_search, c + 1);
+		*c = '\0';
+	}
+
+	/* Parse ?query from selector */
+	if (st.opt_query && (c = strchr(selector, '?'))) {
+		sstrlcpy(st.req_query_string, c + 1);
+		*c = '\0';
+	}
+
+	/* Parse ;vhost from selector */
+	if (st.opt_vhost && (c = strchr(selector, ';'))) {
+		sstrlcpy(st.server_host, c + 1);
+		*c = '\0';
+	}
+
 	/* Loop through the selector, fix it & separate query_string */
 	dest = st.req_selector;
 	if (selector[0] != '/') *dest++ = '/';
@@ -605,26 +658,14 @@ int main(int argc, char *argv[])
 		while (*c == '/' && *(c + 1) == '/') c++;
 		if (*c == '/' && *(c + 1) == '.' && *(c + 2) == '/') c += 2;
 
-		/* Start of a query string (either type 7 or HTTP-style)? */
-		if (*c == '\t' || (st.opt_query && *c == '?')) {
-			sstrlcpy(st.req_query_string, c + 1);
-			if ((c = strchr(st.req_query_string, '\t'))) *c = '\0';
-			break;
-		}
-
-		/* Start of virtual host hint? */
-		if (*c == ';') {
-			if (st.opt_vhost) sstrlcpy(st.server_host, c + 1);
-
-			/* Skip vhost on selector */
-			while (*c && *c != '\t') c++;
-			continue;
-		}
-
 		/* Copy valid char */
 		*dest++ = *c++;
 	}
 	*dest = '\0';
+
+	/* Main query parameters compatibility with older versions of Gophernicus */
+	if (*st.req_query_string && !*st.req_search) sstrlcpy(st.req_search, st.req_query_string);
+	if (!*st.req_query_string && *st.req_search) sstrlcpy(st.req_query_string, st.req_search);
 
 	/* Remove encodings from selector */
 	strndecode(st.req_selector, st.req_selector, sizeof(st.req_selector));
@@ -708,7 +749,8 @@ int main(int argc, char *argv[])
 
 	/* Log the request */
 	if (st.opt_syslog) {
-		syslog(LOG_INFO, "request for \"gopher://%s:%i/%c%s\" from %s",
+		syslog(LOG_INFO, "request for \"gopher%s://%s:%i/%c%s\" from %s",
+			(st.server_port == st.server_tls_port ? "s" : ""),
 			st.server_host,
 			st.server_port,
 			st.req_filetype,

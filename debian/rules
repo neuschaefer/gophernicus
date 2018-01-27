@@ -20,6 +20,7 @@ build-stamp:
 	dh_testdir
 
 	$(MAKE)
+	$(MAKE) ChangeLog
 
 	touch $@
 
@@ -43,7 +44,8 @@ install: build
 	rm -rf $(DEST)/tmp
 	ln -s /usr/share/doc/gophernicus/ $(DEST)/var/gopher/docs
 	ln -s /usr/bin/php5 $(DEST)/usr/lib/gophernicus/filters/php
-	cp gophermap $(DEST)/usr/lib/gophernicus/
+	cp $(CURDIR)/gophermap $(DEST)/usr/lib/gophernicus/
+	cp $(CURDIR)/gophernicus.socket $(CURDIR)/gophernicus@.service $(DEST)/lib/systemd/system/
 
 # Build architecture-independent files here.
 binary-indep: build install
@@ -65,7 +67,7 @@ binary-arch: build install
 #	dh_installpam
 #	dh_installmime
 #	dh_python
-#	dh_installinit
+	dh_installinit
 #	dh_installcron
 #	dh_installinfo
 #	dh_installman

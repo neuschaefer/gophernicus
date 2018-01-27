@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,7 +65,6 @@ void get_shm_session(state *st, shm_state *shm)
 	/* Get session data */
 	if (st->opt_vhost) {
 		sstrlcpy(st->server_host, shm->session[i].server_host);
-		st->server_port = shm->session[i].server_port;
 	}
 }
 #endif
@@ -97,6 +96,7 @@ void update_shm_session(state *st, shm_state *shm)
 				sstrlcpy(shm->session[i].req_remote_addr, st->req_remote_addr);
 				shm->session[i].hits = 0;
 				shm->session[i].kbytes = 0;
+				shm->session[i].session_id = rand();
 				break;
 			}
 		}
@@ -107,13 +107,17 @@ void update_shm_session(state *st, shm_state *shm)
 
 	/* Get referrer from old session data */
 	if (*shm->session[i].server_host) {
-		snprintf(buf, sizeof(buf), "gopher://%s:%i/%c%s",
+		snprintf(buf, sizeof(buf), "gopher%s://%s:%i/%c%s",
+			(shm->session[i].server_port == st->server_tls_port ? "s" : ""),
 			shm->session[i].server_host,
 			shm->session[i].server_port,
 			shm->session[i].req_filetype,
 			shm->session[i].req_selector);
 		sstrlcpy(st->req_referrer, buf);
 	}
+
+	/* Get public session id */
+	st->session_id = shm->session[i].session_id;
 
 	/* Update session data */
 	sstrlcpy(shm->session[i].server_host, st->server_host);

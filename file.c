@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -109,6 +109,7 @@ void url_redirect(state *st)
 	sstrlcpy(dest, st->req_selector + 4);
 
 	if (sstrncmp(dest, "http://") != MATCH &&
+	    sstrncmp(dest, "https://") != MATCH &&
 	    sstrncmp(dest, "ftp://") != MATCH &&
 	    sstrncmp(dest, "mailto:") != MATCH)
 		die(st, ERR_ACCESS, "Refusing to HTTP redirect unsafe protocols");
@@ -118,7 +119,8 @@ void url_redirect(state *st)
 
 	/* Log the redirect */
 	if (st->opt_syslog) {
-		syslog(LOG_INFO, "request for \"gopher://%s:%i/h%s\" from %s",
+		syslog(LOG_INFO, "request for \"gopher%s://%s:%i/h%s\" from %s",
+			(st->server_port == st->server_tls_port ? "s" : ""),
 			st->server_host,
 			st->server_port,
 			st->req_selector,
@@ -154,7 +156,8 @@ void server_status(state *st, shm_state *shm, int shmid)
 
 	/* Log the request */
 	if (st->opt_syslog) {
-		syslog(LOG_INFO, "request for \"gopher://%s:%i/0" SERVER_STATUS "\" from %s",
+		syslog(LOG_INFO, "request for \"gopher%s://%s:%i/0" SERVER_STATUS "\" from %s",
+			(st->server_port == st->server_tls_port ? "s" : ""),
 			st->server_host,
 			st->server_port,
 			st->req_remote_addr);
@@ -201,11 +204,12 @@ void server_status(state *st, shm_state *shm, int shmid)
 		if ((now - shm->session[i].req_atime) < st->session_timeout) {
 			sessions++;
 
-			printf("Session: %-4i %-40s %-4li %-7li gopher://%s:%i/%c%s" CRLF,
+			printf("Session: %-4i %-40s %-4li %-7li gopher%s://%s:%i/%c%s" CRLF,
 				(int) (now - shm->session[i].req_atime),
 				shm->session[i].req_remote_addr,
 				shm->session[i].hits,
 				shm->session[i].kbytes,
+				(shm->session[i].server_port == st->server_tls_port ? "s" : ""),
 				shm->session[i].server_host,
 				shm->session[i].server_port,
 				shm->session[i].req_filetype,
@@ -225,7 +229,8 @@ void caps_txt(state *st, shm_state *shm)
 {
 	/* Log the request */
 	if (st->opt_syslog) {
-		syslog(LOG_INFO, "request for \"gopher://%s:%i/0" CAPS_TXT "\" from %s",
+		syslog(LOG_INFO, "request for \"gopher%s://%s:%i/0" CAPS_TXT "\" from %s",
+			(st->server_port == st->server_tls_port ? "s" : ""),
 			st->server_host,
 			st->server_port,
 			st->req_remote_addr);
@@ -259,11 +264,16 @@ void caps_txt(state *st, shm_state *shm)
 		"PathParent=.." CRLF
 		"PathParentDouble=FALSE" CRLF
 		"PathKeepPreDelimeter=FALSE" CRLF
+		"ServerSupportsStdinScripts=TRUE" CRLF
+		"ServerDefaultEncoding=%s" CRLF
+		"ServerTLSPort=%i" CRLF
 		CRLF
 		"ServerSoftware=" SERVER_SOFTWARE CRLF
-		"ServerSoftwareVersion=" VERSION CRLF
+		"ServerSoftwareVersion=" VERSION " \"" CODENAME "\"" CRLF
 		"ServerArchitecture=%s" CRLF,
 			st->session_timeout,
+			strcharset(st->out_charset),
+			st->server_tls_port,
 			st->server_platform);
 
 	/* Optional keys */
@@ -302,9 +312,16 @@ void setenv_cgi(state *st, char *script)
 	else
 		setenv("SERVER_PROTOCOL", "RFC1436", 1);
 
+	if (st->server_port == st->server_tls_port) {
+		setenv("HTTPS", "on", 1);
+		setenv("TLS", "on", 1);
+	}
+
 	setenv("SERVER_NAME", st->server_host, 1);
 	snprintf(buf, sizeof(buf), "%i", st->server_port);
 	setenv("SERVER_PORT", buf, 1);
+	snprintf(buf, sizeof(buf), "%i", st->server_tls_port);
+	setenv("SERVER_TLS_PORT", buf, 1);
 	setenv("REQUEST_METHOD", "GET", 1);
 	setenv("DOCUMENT_ROOT", st->server_root, 1);
 	setenv("SCRIPT_NAME", st->req_selector, 1);
@@ -312,6 +329,10 @@ void setenv_cgi(state *st, char *script)
 	setenv("LOCAL_ADDR", st->req_local_addr, 1);
 	setenv("REMOTE_ADDR", st->req_remote_addr, 1);
 	setenv("HTTP_REFERER", st->req_referrer, 1);
+#ifdef HAVE_SHMEM
+	snprintf(buf, sizeof(buf), "%x", st->session_id);
+	setenv("SESSION_ID", buf, 1);
+#endif
 	setenv("HTTP_ACCEPT_CHARSET", strcharset(st->out_charset), 1);
 
 	/* Gophernicus extras */
@@ -321,6 +342,8 @@ void setenv_cgi(state *st, char *script)
 	setenv("GOPHER_REFERER", st->req_referrer, 1);
 	snprintf(buf, sizeof(buf), "%i", st->out_width);
 	setenv("COLUMNS", buf, 1);
+	snprintf(buf, sizeof(buf), CODENAME);
+	setenv("SERVER_CODENAME", buf, 1);
 
 	/* Bucktooth extras */
 	if (*st->req_query_string) {
@@ -332,7 +355,7 @@ void setenv_cgi(state *st, char *script)
 
 	setenv("SERVER_HOST", st->server_host, 1);
 	setenv("REQUEST", st->req_selector, 1);
-	setenv("SEARCHREQUEST", st->req_query_string, 1);
+	setenv("SEARCHREQUEST", st->req_search, 1);
 }
 
 

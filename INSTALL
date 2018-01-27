@@ -13,15 +13,11 @@ $ cd gophernicus-*
 $ make
 $ sudo make install
 
-Then add the below line to your /etc/inetd.conf and restart
-inetd. If your system comes with something else than standard
-inetd "make install" should have done the right thing already.
-
-gopher  stream  tcp  nowait  nobody  /usr/sbin/in.gophernicus  in.gophernicus -h <hostname>
-
-The -h <hostname> parameter is mandatory for a properly working
-Gophernicus. Other parameters can also be added, see the full
-list by running "/usr/sbin/in.gophernicus -?"
+That's it - Gophernicus should now be installed, preconfigured
+and running under gopher://<HOSTNAME>/. And more often than not,
+It Just Works(tm). If gopher links don't seem to work you may
+need to configure your public hostname explicitly in whatever
+config file Gophernicus is using.
 
 By default Gophernicus serves gopher documents from /var/gopher
 although that can be changed by using the -r <root> parameter.
@@ -29,6 +25,33 @@ To enable virtual hosting create hostname directories under
 the gopher root and make sure you have at least the primary
 hostname (the one set with -h <hostname>) directory available
 (mkdir /var/gopher/$HOSTNAME).
+
+
+Compiling with TCP wrappers
+===========================
+
+Gophernicus uses no extra libraries... well... except libwrap
+(TCP wrappers) if it is installed with headers in default Unix
+directories at the time of compiling. If you have the headers
+installed and don't want wrapper support, run 'make generic'
+instead of just 'make', and if you have wrappers installed in
+non-standard place and want to force compile with wrappers
+just run 'make withwrap'.
+
+For configuring IP access lists with TCP wrappers, take a look
+at the files /etc/hosts.allow and /etc/hosts.deny (because the
+manual pages suck). Use the daemon name 'in.gophernicus' to
+make your access lists.
+
+
+Running with traditional inetd superserver
+==========================================
+
+If you want to run Gophernicus under the traditional Unix
+inetd, add the below line to your /etc/inetd.conf and restart
+the inetd process.
+
+gopher  stream  tcp  nowait  nobody  /usr/sbin/in.gophernicus  in.gophernicus -h <hostname>
 
 
 Compiling on Debian Linux (and Ubuntu)
@@ -43,13 +66,8 @@ of "sudo make install" you should just install the deb with
 "dpkg -i ../gophernicus_*.deb" after which It Should Just
 Work(tm).
 
-
-Compiling on Mac OS X
-=====================
-
-When you run "make install" on OSX-like system with launchd
-the install routine also installs a plist file and tells launchd
-to start the server up. In other words, It Just Works(tm).
+If you need TCP wrappers support on Debian/Ubuntu, please
+install libwrap0-dev before compiling.
 
 
 Cross-compiling
@@ -70,16 +88,14 @@ Gophernicus uses SYSV shared memory for session tracking and
 statistics. It creates the shared memory block using mode 600
 and a predefined key which means that a shared memory block
 created with one user cannot be used by another user. Simply
-said, running in.gophernicus as yourself will allocate that
-memory, and then running the binary through inetd as another
-user (nobody) will be denied access to that memory.
+said, running in.gophernicus under various different user
+accounts may create a situation where the memory block is locked
+to the wrong user.
 
 If that happens you can simply delete the memory block and
-let Gophernicus recreate it - no harm done.
+let Gophernicus recreate it - no harm done:
 
-$ su -
-# ipcs -m | grep beeb
-# ipcrm -M <key from the above command>
+$ sudo make clean-shm
 
 
 Porting to different platforms
@@ -94,21 +110,23 @@ include them into the next release.
 
 Tested (and semi-supported) platforms include:
 
-  OS            Arch          Compiler
- +-------------+-------------+-------------+
-  AIX 5         POWER3        gcc 4
-  AIX 6         POWER4        gcc 4
-  AIX 7         POWER5        gcc 4
-  CentOS 5      x86_64        gcc 4
-  Debian Linux  i386          gcc 4
-  Debian Linux  armv5tel      gcc 4
-  Maemo 5       armv7l        gcc 4
-  MacOSX 10.5   i386          gcc 4
-  MacOSX 10.7   x86_64        llvm-gcc 4
-  MacOSX 10.8   x86_64        clang 3
-  MacOSX 10.10  x86_64        clang 6
-  NetBSD 5      x86_64        gcc 4
-  Haiku R1      i386          gcc 2
-
-
+  OS              Arch          Compiler
+ +---------------+-------------+-------------+
+  AIX 5           POWER3        gcc 4
+  AIX 6           POWER4        gcc 4
+  AIX 7           POWER5        gcc 4
+  CentOS 5        x86_64        gcc 4
+  CentOS 7        x86_64        gcc 4
+  Debian Squeeze  armv5tel      gcc 4
+  Debian Wheezy   i386          gcc 4
+  Debian Wheezy   x86_64        gcc 4
+  Debian Jessie   x86_64        gcc 4
+  Maemo 5         armv7l        gcc 4
+  MacOSX 10.5     i386          gcc 4
+  MacOSX 10.7     x86_64        llvm-gcc 4
+  MacOSX 10.8     x86_64        clang 3
+  MacOSX 10.10    x86_64        clang 6
+  MacOSX 10.11    x86_64        clang 7
+  NetBSD 5        x86_64        gcc 4
+  Haiku R1        i386          gcc 2
 

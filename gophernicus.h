@@ -1,5 +1,5 @@
 /*
- * Gophernicus - Copyright (c) 2009-2014 Kim Holviala <kim@holviala.com>
+ * Gophernicus - Copyright (c) 2009-2017 Kim Holviala <kim@holviala.com>
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,7 @@
  */
 #undef  ENABLE_STRICT_RFC1436	/* Follow RFC1436 to the letter */
 #undef  ENABLE_AUTOHIDING	/* Hide manually listed resources from generated menus */
+#define ENABLE_HAPROXY1		/* Autodetect HAproxy/Stunnel proxy protocol v1 */
 
 
 /*
@@ -48,12 +49,13 @@
 #define HAVE_POPEN		/* popen() */
 #undef  HAVE_STRLCPY		/* strlcpy() from OpenBSD */
 #undef  HAVE_SENDFILE		/* sendfile() in Linux & others */
+/* #undef  HAVE_LIBWRAP		   autodetected, don't enable here */
 
 /* Linux */
 #ifdef __linux
 #undef  PASSWD_MIN_UID
 #define PASSWD_MIN_UID 500
-#define HAVE_SENDFILE
+#define _FILE_OFFSET_BITS 64
 #endif
 
 /* Embedded Linux with uClibc */
@@ -80,6 +82,11 @@
 #endif
 #endif
 
+/* AIX */
+#if defined(_AIX)
+#define _LARGE_FILES 1
+#endif
+
 /* Add other OS-specific defines here */
 
 /*
@@ -98,6 +105,7 @@
 #include <errno.h>
 #include <pwd.h>
 #include <limits.h>
+#include <ctype.h>
 
 #ifdef HAVE_SENDFILE
 #include <sys/sendfile.h>
@@ -130,6 +138,10 @@ size_t strlcpy(char *dst, const char *src, size_t siz);
 size_t strlcat(char *dst, const char *src, size_t siz);
 #endif
 
+#ifdef HAVE_LIBWRAP
+#include <tcpd.h>
+#endif
+
 /*
  * Compile-time configuration
  */
@@ -148,6 +160,8 @@ size_t strlcat(char *dst, const char *src, size_t siz);
 #define ERROR		-1
 
 #define MATCH		0
+#define WRAP_DENIED	0
+
 
 /* Gopher filetypes */
 #define TYPE_TEXT	'0'
@@ -181,18 +195,19 @@ size_t strlcat(char *dst, const char *src, size_t siz);
 #define HTTP_USERAGENT	"Unknown gopher client"
 
 /* Defaults for settings */
-#define DEFAULT_HOST	"localhost"
-#define DEFAULT_PORT	70
-#define DEFAULT_TYPE	TYPE_TEXT
-#define DEFAULT_MAP	"gophermap"
-#define DEFAULT_TAG	"gophertag"
-#define DEFAULT_CGI	"/cgi-bin/"
-#define DEFAULT_USERDIR	"public_gopher"
-#define DEFAULT_ADDR	"unknown"
-#define DEFAULT_WIDTH	70
-#define DEFAULT_CHARSET	US_ASCII
-#define MIN_WIDTH	33
-#define MAX_WIDTH	200
+#define DEFAULT_HOST		"localhost"
+#define DEFAULT_PORT		70
+#define DEFAULT_TLS_PORT	0
+#define DEFAULT_TYPE		TYPE_TEXT
+#define DEFAULT_MAP		"gophermap"
+#define DEFAULT_TAG		"gophertag"
+#define DEFAULT_CGI		"/cgi-bin/"
+#define DEFAULT_USERDIR		"public_gopher"
+#define DEFAULT_WIDTH		76
+#define DEFAULT_CHARSET		US_ASCII
+#define MIN_WIDTH		33
+#define MAX_WIDTH		200
+#define UNKNOWN_ADDR		"unknown"
 
 /* Session defaults */
 #define DEFAULT_SESSION_TIMEOUT		1800
@@ -276,6 +291,7 @@ typedef struct {
 	char req_selector[BUFSIZE];
 	char req_realpath[BUFSIZE];
 	char req_query_string[BUFSIZE];
+	char req_search[BUFSIZE];
 	char req_referrer[BUFSIZE];
 	char req_local_addr[64];
 	char req_remote_addr[64];
@@ -296,6 +312,7 @@ typedef struct {
 	char server_host_default[64];
 	char server_host[64];
 	int  server_port;
+	int  server_tls_port;
 
 	char default_filetype;
 	char map_file[64];
@@ -318,6 +335,7 @@ typedef struct {
 	int session_timeout;
 	int session_max_kbytes;
 	int session_max_hits;
+	int session_id;
 
 	/* Feature options */
 	char opt_parent;
@@ -332,13 +350,14 @@ typedef struct {
 	char opt_caps;
 	char opt_shm;
 	char opt_root;
+	char opt_proxy;
 	char debug;
 } state;
 
 /* Shared memory for session & accounting data */
 #ifdef HAVE_SHMEM
 
-#define SHM_KEY		0xbeeb0006	/* Unique identifier + struct version */
+#define SHM_KEY		0xbeeb0008	/* Unique identifier + struct version */
 #define SHM_MODE	0600		/* Access mode for the shared memory */
 #define SHM_SESSIONS	256		/* Max amount of user sessions to track */
 
@@ -350,6 +369,7 @@ typedef struct {
 	char req_selector[128];
 	char req_remote_addr[64];
 	char req_filetype;
+	int session_id;
 
 	char server_host[64];
 	int  server_port;
@@ -394,7 +414,7 @@ typedef struct {
 	"mbox","M", \
 	"pdf","d","ps","d","doc","d","ppt","d","xls","d","xlsx","d","docx","d","pptx","d", \
 	"mp3","s","wav","s","mid","s","wma","s","flac","s","ogg","s","aiff","s","aac","s", \
-	"avi",";","mp4",";","mpg",";","mov",";","qt",";","asf",";","mpv",";","m4v",";", \
+	"avi",";","mp4",";","mpg",";","mov",";","qt",";","asf",";","mpv",";","m4v",";","webm",";","ogv",";", \
 	NULL, NULL
 
 /*
